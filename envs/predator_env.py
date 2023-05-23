@@ -15,8 +15,8 @@ WIDTH = 20
 
 class Entity(object):
     def __init__(self, name, speed, color):
-        self.x = np.random.randint(0, HEIGHT)
-        self.y = np.random.randint(0, WIDTH)
+        self.x = np.random.randint(0, HEIGHT - 1)
+        self.y = np.random.randint(0, WIDTH - 1)
         self.name = name
         self.speed = speed
         self.color = color
@@ -43,8 +43,8 @@ class Entity(object):
         if (direction == 7):
             x -= 1
             y -= 1
-        x = max(min(x, HEIGHT), 0)
-        y = max(min(y, WIDTH), 0)
+        x = max(min(x, HEIGHT - 1), 0)
+        y = max(min(y, WIDTH - 1), 0)
         return (x, y)
 
 
@@ -124,8 +124,9 @@ class PredatorPreyEnv(Env):
 
         for movement in range(self.prey.speed):
             new_locations = [np.array(self.prey.move(dir)) for dir in range(8)]
-
-            distances = [np.linalg.norm(x - np.array([self.predator.x, self.predator.y])) for x in new_locations]
+            print(new_locations)
+            distances = [2 * np.linalg.norm(x - np.array([self.predator.x, self.predator.y])) for x in new_locations]
+            print(distances)
             for x in range(8):
                 distances[x] += min(new_locations[x][0], HEIGHT -  new_locations[x][0]) + min(new_locations[x][1], WIDTH -  new_locations[x][1])
             best = np.argmax(np.array(distances))
