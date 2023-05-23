@@ -10,7 +10,7 @@ class PredatorPreyEnvironment(gym.Env):
     def __init__(self):
         super(PredatorPreyEnvironment, self).__init__()
         self.state_size = 4  # Example: 4-dimensional state
-        self.action_size = 9  # Example: 9 actions (up, down, left, right, up-left, up-right, down-left, down-right, stay)
+        self.action_size = 8  # Example: 9 actions (up, down, left, right, up-left, up-right, down-left, down-right)
         self.max_steps = 100  # Maximum number of steps per episode
         self.current_step = 0
         self.prey_position = np.array([0, 0])  # Example: Prey's initial position
@@ -36,7 +36,6 @@ class PredatorPreyEnvironment(gym.Env):
             5: np.array([-1, 1]),   # Up-Right
             6: np.array([1, -1]),   # Down-Left
             7: np.array([1, 1]),    # Down-Right
-            8: np.array([0, 0])     # Stay
         }
 
         predator_direction = directions[action]
@@ -71,19 +70,21 @@ class PredatorPreyEnvironment(gym.Env):
         return state
 
     def _get_prey_direction(self):
-        # Calculate prey direction based on distance from the predator
-        distance_vector = self.predator_position - self.prey_position
-
-        # Find the index of the direction that maximizes the distance from the predator
-        max_distance_idx = np.argmax(np.abs(distance_vector))
-
-        # Generate the prey direction vector by setting the corresponding coordinate to the sign of the distance vector
-        prey_direction = np.zeros(2)
-        prey_direction[max_distance_idx] = np.sign(distance_vector[max_distance_idx])
-
-        return prey_direction
-
-# Rest of the code remains the same as before
+        directions = {
+            0: np.array([-1, 0]),   # Up
+            1: np.array([1, 0]),    # Down
+            2: np.array([0, -1]),   # Left
+            3: np.array([0, 1]),    # Right
+            4: np.array([-1, -1]),  # Up-Left
+            5: np.array([-1, 1]),   # Up-Right
+            6: np.array([1, -1]),   # Down-Left
+            7: np.array([1, 1]),    # Down-Right
+        }
+        new_locations = [np.array(self.prey.move(dir)) for dir in range(8)]
+        new_locations = [np.clip(loc, 0, 3) for loc in new_locations]
+        distances = [np.linalg.norm(x - np.array([self.predator.x, self.predator.y])) for x in new_locations]
+        best = np.argmax(np.array(distances))
+        return directions[best]
 
 # Define the Q-Network
 
