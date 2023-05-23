@@ -15,12 +15,14 @@ class PredatorPreyEnvironment(gym.Env):
         self.max_steps = 500  # Maximum number of steps per episode
         self.current_step = 0
         self.prey_position = np.array([0, 0])  # Example: Prey's initial position
-        self.predator_position = np.array([2, 2])  # Example: Initial position of the predator
-
+        #self.predator_position = np.array([2, 2])  # Example: Initial position of the predator
+        self.predator_position = np.random.randint(0, board_size, 2)
+    
     def reset(self):
         self.current_step = 0
         self.prey_position = np.array([0, 0])  # Example: Prey's initial position
-        self.predator_position = np.array([2, 2])  # Example: Initial position of the predator
+        #self.predator_position = np.array([2, 2])  # Example: Initial position of the predator
+        self.predator_position = np.random.randint(0, board_size, 2)
         state = self._get_state()
         return state
 
