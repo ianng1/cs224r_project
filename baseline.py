@@ -1,13 +1,19 @@
 import numpy as np
-import tensorflow as tf
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
+from collections import deque
+import random
 
 # Define the environment
+board_size = 10
 
 class PredatorPreyEnvironment:
     def __init__(self):
         self.state_size = 4  # Example: 4-dimensional state
-        self.action_size = 4  # Example: 4 actions (up, down, left, right)
-        self.max_steps = 100  # Maximum number of steps per episode
+        self.action_size = 8  # Example: 4 actions (up, down, left, right)
+        self.max_steps = 500  # Maximum number of steps per episode
         self.current_step = 0
         self.prey_position = [0, 0]  # Example: Prey's initial position
         self.predator_positions = [[2, 2], [3, 3]]  # Example: Initial positions of two predators
@@ -22,40 +28,43 @@ class PredatorPreyEnvironment:
     def step(self, actions):
         self.current_step += 1
 
-        # Update predator positions based on the actions
-        for i, action in enumerate(actions):
-            if action == 0:  # Up
-                self.predator_positions[i][0] -= 1
-            elif action == 1:  # Down
-                self.predator_positions[i][0] += 1
-            elif action == 2:  # Left
-                self.predator_positions[i][1] -= 1
-            elif action == 3:  # Right
-                self.predator_positions[i][1] += 1
+        # Define movement directions for both predator and prey
+        directions = {
+            0: np.array([-1, 0]),   # Up
+            1: np.array([1, 0]),    # Down
+            2: np.array([0, -1]),   # Left
+            3: np.array([0, 1]),    # Right
+            4: np.array([-1, -1]),  # Up-Left
+            5: np.array([-1, 1]),   # Up-Right
+            6: np.array([1, -1]),   # Down-Left
+            7: np.array([1, 1]),    # Down-Right
+        }
 
-            # Clip positions within the boundaries of the environment
-            self.predator_positions[i] = np.clip(self.predator_positions[i], 0, 3)
+        predator_direction = directions[action]
+        prey_direction = self._get_prey_direction()
 
-        # Update prey position randomly
-        self.prey_position[0] += np.random.randint(-1, 2)
-        self.prey_position[1] += np.random.randint(-1, 2)
-        self.prey_position = np.clip(self.prey_position, 0, 3)
+        # Update predator position based on the action
+        self.predator_position += predator_direction
+        self.predator_position = np.clip(self.predator_position, 0, board_size - 1)
+
+        # Update prey position based on distance-based movement
+        prey_speed = 2  # Number of grid cells the prey can move in a single time step
+        self.prey_position += prey_speed * prey_direction
+        self.prey_position = np.clip(self.prey_position, 0, board_size - 1)
 
         # Calculate rewards
-        rewards = []
-        done = False
-        for i in range(len(actions)):
-            if self.predator_positions[i] == self.prey_position:
-                rewards.append(1.0)  # Predator caught the prey
-                done = True
-            elif self.current_step >= self.max_steps:
-                rewards.append(0.0)  # Maximum steps reached
-                done = True
-            else:
-                rewards.append(-0.1)  # Default reward
+        if np.array_equal(self.predator_position, self.prey_position):
+            reward = 1.0  # Predator caught the prey
+            done = True
+        elif self.current_step >= self.max_steps:
+            reward = 0.0  # Maximum steps reached
+            done = True
+        else:
+            reward = -0.1  # Default reward
+            done = False
 
         state = self._get_state()
-        return state, rewards, done
+        return state, reward, done, {}
 
     def _get_state(self):
         # Example: Concatenate predator and prey positions as the state
@@ -63,6 +72,33 @@ class PredatorPreyEnvironment:
         return state
 
 # Define the MADDPG agent
+
+class Actor(nn.Module):
+    def __init__(self, state_size, action_size):
+        super(Actor, self).__init__()
+        self.fc1 = nn.Linear(state_size, 32)
+        self.fc2 = nn.Linear(32, 32)
+        self.fc3 = nn.Linear(32, action_size)
+
+    def forward(self, state):
+        x = F.relu(self.fc1(state))
+        x = F.relu(self.fc2(x))
+        x = torch.tanh(self.fc3(x))
+        return x
+
+class Critic(nn.Module):
+    def __init__(self, state_size, action_size):
+        super(Critic, self).__init__()
+        self.fc1 = nn.Linear(state_size + action_size, 64)
+        self.fc2 = nn.Linear(64, 64)
+        self.fc3 = nn.Linear(64, 1)
+
+    def forward(self, state, action):
+        x = torch.cat((state, action), dim=1)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
 
 class MADDPGAgent:
     def __init__(self, state_size, action_size, discount_factor=0.99, tau=0.01):
@@ -72,68 +108,53 @@ class MADDPGAgent:
         self.tau = tau
 
         # Create local and target actor and critic networks
-        self.local_actor = self._build_actor_model()
-        self.target_actor = self._build_actor_model()
-        self.local_critic = self._build_critic_model()
-        self.target_critic = self._build_critic_model()
+        self.local_actor = Actor(state_size, action_size)
+        self.target_actor = Actor(state_size, action_size)
+        self.local_critic = Critic(state_size, action_size)
+        self.target_critic = Critic(state_size, action_size)
 
         # Initialize target networks with local network weights
-        self.update_target_networks(tau=1.0)
+        self.target_actor.load_state_dict(self.local_actor.state_dict())
+        self.target_critic.load_state_dict(self.local_critic.state_dict())
 
-    def _build_actor_model(self):
-        model = tf.keras.Sequential([
-            tf.keras.layers.Dense(32, activation='relu', input_shape=(self.state_size,)),
-            tf.keras.layers.Dense(32, activation='relu'),
-            tf.keras.layers.Dense(self.action_size, activation='tanh')
-        ])
-        return model
-
-    def _build_critic_model(self):
-        state_input = tf.keras.layers.Input(shape=(self.state_size,))
-        action_input = tf.keras.layers.Input(shape=(self.action_size,))
-        x = tf.keras.layers.Concatenate()([state_input, action_input])
-        x = tf.keras.layers.Dense(64, activation='relu')(x)
-        x = tf.keras.layers.Dense(64, activation='relu')(x)
-        x = tf.keras.layers.Dense(1)(x)
-        model = tf.keras.models.Model(inputs=[state_input, action_input], outputs=x)
-        return model
-
-    def update_target_networks(self, tau=None):
-        if tau is None:
-            tau = self.tau
-        for local_weight, target_weight in zip(self.local_actor.weights, self.target_actor.weights):
-            target_weight.assign(tau * local_weight + (1.0 - tau) * target_weight)
-        for local_weight, target_weight in zip(self.local_critic.weights, self.target_critic.weights):
-            target_weight.assign(tau * local_weight + (1.0 - tau) * target_weight)
+        # Set up optimizers
+        self.actor_optimizer = optim.Adam(self.local_actor.parameters(), lr=0.001)
+        self.critic_optimizer = optim.Adam(self.local_critic.parameters(), lr=0.001)
 
     def get_action(self, state):
-        state = np.reshape(state, [1, self.state_size])
-        action = self.local_actor.predict(state)[0]
+        state = torch.from_numpy(state).float().unsqueeze(0)
+        with torch.no_grad():
+            action = self.local_actor(state).squeeze(0).numpy()
         return action
 
     def train(self, states, actions, rewards, next_states, dones, other_agents, other_actions):
-        states = np.array(states)
-        actions = np.array(actions)
-        rewards = np.array(rewards)
-        next_states = np.array(next_states)
-        dones = np.array(dones)
+        states = torch.FloatTensor(states)
+        actions = torch.FloatTensor(actions)
+        rewards = torch.FloatTensor(rewards).unsqueeze(1)
+        next_states = torch.FloatTensor(next_states)
+        dones = torch.FloatTensor(dones).unsqueeze(1)
 
         # Update critic
-        next_actions = [agent.target_actor.predict(np.reshape(next_state, (1, -1)))[0] for agent, next_state in zip(other_agents, next_states)]
-        next_actions = np.array(next_actions)
-        target_q_values = rewards[:, np.newaxis] + self.discount_factor * self.target_critic.predict([next_states, next_actions])
-        self.local_critic.train_on_batch([states, actions], target_q_values)
+        next_actions = torch.cat([agent.target_actor(next_state) for agent, next_state in zip(other_agents, next_states)], dim=1)
+        target_values = rewards + self.discount_factor * (1 - dones) * self.target_critic(next_states, next_actions)
+        predicted_values = self.local_critic(states, actions)
+        critic_loss = F.mse_loss(predicted_values, target_values)
+        self.critic_optimizer.zero_grad()
+        critic_loss.backward()
+        self.critic_optimizer.step()
 
         # Update actor
-        with tf.GradientTape() as tape:
-            pred_actions = [agent.local_actor.predict(np.reshape(state, (1, -1)))[0] for agent, state in zip(other_agents, states)]
-            pred_actions = np.array(pred_actions)
-            actor_loss = -tf.reduce_mean(self.local_critic([states, pred_actions]))
-        actor_gradients = tape.gradient(actor_loss, self.local_actor.trainable_variables)
-        self.local_actor.optimizer.apply_gradients(zip(actor_gradients, self.local_actor.trainable_variables))
+        pred_actions = torch.cat([agent.local_actor(state) for agent, state in zip(other_agents, states)], dim=1)
+        actor_loss = -self.local_critic(states, pred_actions).mean()
+        self.actor_optimizer.zero_grad()
+        actor_loss.backward()
+        self.actor_optimizer.step()
 
         # Update target networks
-        self.update_target_networks()
+        for target_param, local_param in zip(self.target_actor.parameters(), self.local_actor.parameters()):
+            target_param.data.copy_(self.tau * local_param.data + (1.0 - self.tau) * target_param.data)
+        for target_param, local_param in zip(self.target_critic.parameters(), self.local_critic.parameters()):
+            target_param.data.copy_(self.tau * local_param.data + (1.0 - self.tau) * target_param.data)
 
 # Define the training loop
 

@@ -5,13 +5,14 @@ import torch.nn as nn
 import torch.optim as optim
 
 # Define the PredatorPreyEnvironment Gym environment
+board_size = 10
 
 class PredatorPreyEnvironment(gym.Env):
     def __init__(self):
         super(PredatorPreyEnvironment, self).__init__()
-        self.state_size = 4  # Example: 4-dimensional state
-        self.action_size = 8  # Example: 9 actions (up, down, left, right, up-left, up-right, down-left, down-right)
-        self.max_steps = 100  # Maximum number of steps per episode
+        self.state_size = 4  # Example: 4-dimensional state 
+        self.action_size = 8  # Example: 8 actions (up, down, left, right, up-left, up-right, down-left, down-right)
+        self.max_steps = 500  # Maximum number of steps per episode
         self.current_step = 0
         self.prey_position = np.array([0, 0])  # Example: Prey's initial position
         self.predator_position = np.array([2, 2])  # Example: Initial position of the predator
@@ -43,12 +44,12 @@ class PredatorPreyEnvironment(gym.Env):
 
         # Update predator position based on the action
         self.predator_position += predator_direction
-        self.predator_position = np.clip(self.predator_position, 0, 3)
+        self.predator_position = np.clip(self.predator_position, 0, board_size - 1)
 
         # Update prey position based on distance-based movement
         prey_speed = 2  # Number of grid cells the prey can move in a single time step
         self.prey_position += prey_speed * prey_direction
-        self.prey_position = np.clip(self.prey_position, 0, 3)
+        self.prey_position = np.clip(self.prey_position, 0, board_size - 1)
 
         # Calculate rewards
         if np.array_equal(self.predator_position, self.prey_position):
@@ -58,7 +59,7 @@ class PredatorPreyEnvironment(gym.Env):
             reward = 0.0  # Maximum steps reached
             done = True
         else:
-            reward = -0.1  # Default reward
+            reward = -np.linalg.norm(self.predator_position - self.prey_position)  # Default reward
             done = False
 
         state = self._get_state()
@@ -81,7 +82,7 @@ class PredatorPreyEnvironment(gym.Env):
             7: np.array([1, 1]),    # Down-Right
         }
         new_locations = [(self.prey_position + directions[i]) for i in range(8)]
-        new_locations = [np.clip(loc, 0, 3) for loc in new_locations]
+        new_locations = [np.clip(loc, 0, board_size - 1) for loc in new_locations]
         distances = [np.linalg.norm(x - np.array([self.predator_position[0], self.predator_position[1]])) for x in new_locations]
         best = np.argmax(np.array(distances))
         return directions[best]
@@ -141,7 +142,7 @@ class DQNAgent:
         reward = torch.tensor(reward, dtype=torch.float32).unsqueeze(0).to(self.device)
         done = torch.tensor(done, dtype=torch.float32).unsqueeze(0).to(self.device)
 
-        q_values = self.model(state).gather(1, action)
+        q_values = self.model(state).gather(1, action.unsqueeze(0))
         next_q_values = self.target_model(next_state).max(1)[0].unsqueeze(1)
         target = reward + self.discount_factor * next_q_values * (1 - done)
 
@@ -163,12 +164,12 @@ def train_agent(env, agent, num_episodes):
 
         while not done:
             action = agent.get_action(state)
-            next_state, reward, done = env.step(action)
+            next_state, reward, done, _ = env.step(action)
             agent.train(state, action, reward, next_state, done)
             total_reward += reward
             state = next_state
 
-        print(f"Episode: {episode + 1}, Total Reward: {total_reward}")
+        print(f"Episode: {episode + 1}, Steps till Capture: {iter}, Total Reward: {total_reward}")
 
 # Create the environment and agent
 
