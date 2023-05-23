@@ -80,7 +80,7 @@ class PredatorPreyEnvironment(gym.Env):
             6: np.array([1, -1]),   # Down-Left
             7: np.array([1, 1]),    # Down-Right
         }
-        new_locations = [np.array(self.prey.move(dir)) for dir in range(8)]
+        new_locations = [(self.prey_position + directions[i]) for i in range(8)]
         new_locations = [np.clip(loc, 0, 3) for loc in new_locations]
         distances = [np.linalg.norm(x - np.array([self.predator_position[0], self.predator_position[1]])) for x in new_locations]
         best = np.argmax(np.array(distances))
