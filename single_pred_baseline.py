@@ -1,61 +1,58 @@
+import gym
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
-# Define the environment
+# Define the PredatorPreyEnvironment Gym environment
 
-class PredatorPreyEnvironment:
+class PredatorPreyEnvironment(gym.Env):
     def __init__(self):
+        super(PredatorPreyEnvironment, self).__init__()
         self.state_size = 4  # Example: 4-dimensional state
-        self.action_size = 8  # Example: 8 actions (up, down, left, right, diagonals)
+        self.action_size = 9  # Example: 9 actions (up, down, left, right, up-left, up-right, down-left, down-right, stay)
         self.max_steps = 100  # Maximum number of steps per episode
         self.current_step = 0
-        self.prey_position = [0, 0]  # Example: Prey's initial position
-        self.predator_position = [2, 2]  # Example: Initial position of the predator
+        self.prey_position = np.array([0, 0])  # Example: Prey's initial position
+        self.predator_position = np.array([2, 2])  # Example: Initial position of the predator
 
     def reset(self):
         self.current_step = 0
-        self.prey_position = [0, 0]  # Example: Prey's initial position
-        self.predator_position = [2, 2]  # Example: Initial position of the predator
+        self.prey_position = np.array([0, 0])  # Example: Prey's initial position
+        self.predator_position = np.array([2, 2])  # Example: Initial position of the predator
         state = self._get_state()
         return state
 
     def step(self, action):
         self.current_step += 1
 
-        # Update predator position based on the action
-        if action == 0:  # Up
-            self.predator_position[0] -= 1
-        elif action == 1:  # Down
-            self.predator_position[0] += 1
-        elif action == 2:  # Left
-            self.predator_position[1] -= 1
-        elif action == 3:  # Right
-            self.predator_position[1] += 1
-        elif action == 4: 
-            self.predator_position[0] += 1
-            self.predator_position[1] += 1
-        elif action == 5:
-            self.predator_position[0] -= 1
-            self.predator_position[1] += 1
-        elif action == 6:
-            self.predator_position[0] += 1
-            self.predator_position[1] -= 1
-        elif action == 8:
-            self.predator_position[0] -= 1
-            self.predator_position[1] += 1
+        # Define movement directions for both predator and prey
+        directions = {
+            0: np.array([-1, 0]),   # Up
+            1: np.array([1, 0]),    # Down
+            2: np.array([0, -1]),   # Left
+            3: np.array([0, 1]),    # Right
+            4: np.array([-1, -1]),  # Up-Left
+            5: np.array([-1, 1]),   # Up-Right
+            6: np.array([1, -1]),   # Down-Left
+            7: np.array([1, 1]),    # Down-Right
+            8: np.array([0, 0])     # Stay
+        }
 
-        # Clip position within the boundaries of the environment
+        predator_direction = directions[action]
+        prey_direction = self._get_prey_direction()
+
+        # Update predator position based on the action
+        self.predator_position += predator_direction
         self.predator_position = np.clip(self.predator_position, 0, 3)
 
-        # Update prey position randomly
-        self.prey_position[0] += np.random.randint(-1, 2)
-        self.prey_position[1] += np.random.randint(-1, 2)
+        # Update prey position based on distance-based movement
+        prey_speed = 2  # Number of grid cells the prey can move in a single time step
+        self.prey_position += prey_speed * prey_direction
         self.prey_position = np.clip(self.prey_position, 0, 3)
 
         # Calculate rewards
-        if self.predator_position == self.prey_position:
+        if np.array_equal(self.predator_position, self.prey_position):
             reward = 1.0  # Predator caught the prey
             done = True
         elif self.current_step >= self.max_steps:
@@ -66,12 +63,27 @@ class PredatorPreyEnvironment:
             done = False
 
         state = self._get_state()
-        return state, reward, done
+        return state, reward, done, {}
 
     def _get_state(self):
         # Example: Concatenate predator and prey positions as the state
         state = np.concatenate((self.predator_position, self.prey_position))
         return state
+
+    def _get_prey_direction(self):
+        # Calculate prey direction based on distance from the predator
+        distance_vector = self.predator_position - self.prey_position
+
+        # Find the index of the direction that maximizes the distance from the predator
+        max_distance_idx = np.argmax(np.abs(distance_vector))
+
+        # Generate the prey direction vector by setting the corresponding coordinate to the sign of the distance vector
+        prey_direction = np.zeros(2)
+        prey_direction[max_distance_idx] = np.sign(distance_vector[max_distance_idx])
+
+        return prey_direction
+
+# Rest of the code remains the same as before
 
 # Define the Q-Network
 
