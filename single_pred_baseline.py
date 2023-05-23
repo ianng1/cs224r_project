@@ -8,7 +8,7 @@ import torch.optim as optim
 class PredatorPreyEnvironment:
     def __init__(self):
         self.state_size = 4  # Example: 4-dimensional state
-        self.action_size = 4  # Example: 4 actions (up, down, left, right)
+        self.action_size = 8  # Example: 8 actions (up, down, left, right, diagonals)
         self.max_steps = 100  # Maximum number of steps per episode
         self.current_step = 0
         self.prey_position = [0, 0]  # Example: Prey's initial position
@@ -32,6 +32,18 @@ class PredatorPreyEnvironment:
         elif action == 2:  # Left
             self.predator_position[1] -= 1
         elif action == 3:  # Right
+            self.predator_position[1] += 1
+        elif action == 4: 
+            self.predator_position[0] += 1
+            self.predator_position[1] += 1
+        elif action == 5:
+            self.predator_position[0] -= 1
+            self.predator_position[1] += 1
+        elif action == 6:
+            self.predator_position[0] += 1
+            self.predator_position[1] -= 1
+        elif action == 8:
+            self.predator_position[0] -= 1
             self.predator_position[1] += 1
 
         # Clip position within the boundaries of the environment
