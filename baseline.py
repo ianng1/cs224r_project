@@ -12,11 +12,16 @@ board_size = 10
 class PredatorPreyEnvironment:
     def __init__(self):
         self.state_size = 4  # Example: 4-dimensional state
-        self.action_size = 8  # Example: 4 actions (up, down, left, right)
-        self.max_steps = 500  # Maximum number of steps per episode
+        self.action_size = 8  # Example: 8 actions (up, down, left, right)
+        self.max_steps = 100  # Maximum number of steps per episode
         self.current_step = 0
         self.prey_position = [0, 0]  # Example: Prey's initial position
         self.predator_positions = [[2, 2], [3, 3]]  # Example: Initial positions of two predators
+
+        agent = DQNAgent(self.state_size, self.action_size)
+        ckpt = torch.load('models/prey_policy.pt')
+        self.prey_policy = agent.model.load_state_dict(ckpt['model_state_dict'])
+        #self.prey_agent.optimizer.load_state_dict(ckpt['optimizer_state_dict'])
 
     def reset(self):
         self.current_step = 0
@@ -25,7 +30,7 @@ class PredatorPreyEnvironment:
         state = self._get_state()
         return state
 
-    def step(self, actions):
+    def step(self, action):
         self.current_step += 1
 
         # Define movement directions for both predator and prey
@@ -41,26 +46,29 @@ class PredatorPreyEnvironment:
         }
 
         predator_direction = directions[action]
-        prey_direction = self._get_prey_direction()
-
+        #prey_direction = self._get_prey_direction()
+        
         # Update predator position based on the action
         self.predator_position += predator_direction
         self.predator_position = np.clip(self.predator_position, 0, board_size - 1)
 
         # Update prey position based on distance-based movement
         prey_speed = 2  # Number of grid cells the prey can move in a single time step
-        self.prey_position += prey_speed * prey_direction
-        self.prey_position = np.clip(self.prey_position, 0, board_size - 1)
+        for i in range(prey_speed):
+            state = self._get_state()
+            prey_action = self.prey_policy.get_action(state)
+            self.prey_position += directions[prey_action]
+            self.prey_position = np.clip(self.prey_position, 0, board_size - 1)
 
         # Calculate rewards
         if np.array_equal(self.predator_position, self.prey_position):
-            reward = 1.0  # Predator caught the prey
+            reward = 5.0  # Predator caught the prey
             done = True
         elif self.current_step >= self.max_steps:
             reward = 0.0  # Maximum steps reached
             done = True
         else:
-            reward = -0.1  # Default reward
+            reward = -0.1  # Distance between predator and prey
             done = False
 
         state = self._get_state()
@@ -156,6 +164,76 @@ class MADDPGAgent:
         for target_param, local_param in zip(self.target_critic.parameters(), self.local_critic.parameters()):
             target_param.data.copy_(self.tau * local_param.data + (1.0 - self.tau) * target_param.data)
 
+class QNetwork(nn.Module):
+    def __init__(self, state_size, action_size):
+        super(QNetwork, self).__init__()
+        self.fc1 = nn.Linear(state_size, 32)
+        self.fc2 = nn.Linear(32, 32)
+        self.fc3 = nn.Linear(32, action_size)
+
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
+    
+class DQNAgent:
+    def __init__(self, state_size, action_size, discount_factor=0.99, learning_rate=0.001):
+        self.state_size = state_size
+        self.action_size = action_size
+        self.discount_factor = discount_factor
+        self.learning_rate = learning_rate
+
+        self.epsilon = 1.0  # Exploration rate
+        self.epsilon_decay = 0.99  # Decay rate for exploration rate
+        self.epsilon_min = 0.01  # Minimum exploration rate
+
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = QNetwork(state_size, action_size).to(self.device)
+        self.target_model = QNetwork(state_size, action_size).to(self.device)
+        self.update_target_model()
+
+        self.optimizer = optim.Adam(self.model.parameters(), lr=self.learning_rate)
+        self.criterion = nn.MSELoss()
+
+    def update_target_model(self):
+        self.target_model.load_state_dict(self.model.state_dict())
+
+    def get_action(self, state):
+        state = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
+        with torch.no_grad():
+            q_values = self.model(state)
+        if np.random.rand() <= self.epsilon:
+            return np.random.choice(self.action_size)  # Exploration
+        else:
+            return torch.argmax(q_values, dim=1).item()  # Exploitation
+
+    def train(self, state, action, reward, next_state, done):
+        state = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
+        next_state = torch.tensor(next_state, dtype=torch.float32).unsqueeze(0).to(self.device)
+        action = torch.tensor(action, dtype=torch.long).unsqueeze(0).to(self.device)
+        reward = torch.tensor(reward, dtype=torch.float32).unsqueeze(0).to(self.device)
+        done = torch.tensor(done, dtype=torch.float32).unsqueeze(0).to(self.device)
+
+        #print()
+        #q_values = self.model(state).gather(1, action)
+        q_values = self.model(state)[0][action]
+        next_q_values = self.target_model(next_state).max(1)[0].unsqueeze(1)
+        target = reward + self.discount_factor * next_q_values * (1 - done)
+
+        loss = self.criterion(q_values, target)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        if self.epsilon > self.epsilon_min:
+            self.epsilon *= self.epsilon_decay
+    
+    def save_model(self, location):
+        torch.save(self.model.state_dict(), location)
+
+
+
 # Define the training loop
 
 def train_agents(env, agents, num_episodes):
@@ -170,7 +248,7 @@ def train_agents(env, agents, num_episodes):
                 action = agent.get_action(states)
                 actions.append(action)
 
-            next_states, rewards, done = env.step(actions)
+            next_states, rewards, done, _ = env.step(actions)
 
             for i, agent in enumerate(agents):
                 agent.train(states, actions[i], rewards[i], next_states, done, agents, actions)
