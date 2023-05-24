@@ -12,11 +12,15 @@ class PredatorPreyEnvironment(gym.Env):
         super(PredatorPreyEnvironment, self).__init__()
         self.state_size = 4  # Example: 4-dimensional state 
         self.action_size = 8  # Example: 8 actions (up, down, left, right, up-left, up-right, down-left, down-right)
-        self.max_steps = 500  # Maximum number of steps per episode
+        self.max_steps = 100  # Maximum number of steps per episode
         self.current_step = 0
         self.prey_position = np.array([0, 0])  # Example: Prey's initial position
         #self.predator_position = np.array([2, 2])  # Example: Initial position of the predator
         self.predator_position = np.random.randint(0, board_size, 2)
+        
+        agent = DQNAgent(self.state_size, self.action_size)
+        ckpt = torch.load('models/prey_policy.pt')
+        self.prey_policy = agent.model.load_state_dict(ckpt['model_state_dict'])
     
     def reset(self):
         self.current_step = 0
@@ -42,7 +46,7 @@ class PredatorPreyEnvironment(gym.Env):
         }
 
         predator_direction = directions[action]
-        prey_direction = self._get_prey_direction()
+        #prey_direction = self._get_prey_direction()
 
         # Update predator position based on the action
         self.predator_position += predator_direction
@@ -50,18 +54,21 @@ class PredatorPreyEnvironment(gym.Env):
 
         # Update prey position based on distance-based movement
         prey_speed = 2  # Number of grid cells the prey can move in a single time step
-        self.prey_position += prey_speed * prey_direction
-        self.prey_position = np.clip(self.prey_position, 0, board_size - 1)
-
+        for _ in range(prey_speed):
+            state = self._get_state()
+            prey_action = self.prey_policy.get_action(state)
+            self.prey_position += directions[prey_action]
+            self.prey_position = np.clip(self.prey_position, 0, board_size - 1)
+        
         # Calculate rewards
         if np.array_equal(self.predator_position, self.prey_position):
-            reward = 1.0  # Predator caught the prey
+            reward = 5.0  # Predator caught the prey
             done = True
         elif self.current_step >= self.max_steps:
             reward = 0.0  # Maximum steps reached
             done = True
         else:
-            reward = -np.linalg.norm(self.predator_position - self.prey_position)  # Default reward
+            reward = -0.1  # Default reward
             done = False
 
         state = self._get_state()
@@ -72,6 +79,7 @@ class PredatorPreyEnvironment(gym.Env):
         state = np.concatenate((self.predator_position, self.prey_position))
         return state
 
+    # not pretrained policy
     def _get_prey_direction(self):
         directions = {
             0: np.array([-1, 0]),   # Up
