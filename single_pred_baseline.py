@@ -3,7 +3,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-
+import matplotlib.pyplot as plt
+import csv
 # Define the PredatorPreyEnvironment Gym environment
 board_size = 10
 
@@ -24,9 +25,9 @@ class PredatorPreyEnvironment(gym.Env):
     
     def reset(self):
         self.current_step = 0
-        self.prey_position = np.array([0, 0])  # Example: Prey's initial position
-        #self.predator_position = np.array([2, 2])  # Example: Initial position of the predator
-        self.predator_position = np.random.randint(0, board_size, 2)
+        self.prey_position = np.array([np.random.randint(0, 9), np.random.randint(0, 9)])
+        #self.prey_position = np.array([2, 2])  # Example: Prey's initial position
+        self.predator_position = np.array([np.random.randint(0, 9), np.random.randint(0, 9)])  # Example: Initial position of the predator
         state = self._get_state()
         return state
 
@@ -60,15 +61,17 @@ class PredatorPreyEnvironment(gym.Env):
             self.prey_position += directions[prey_action]
             self.prey_position = np.clip(self.prey_position, 0, board_size - 1)
         
+
         # Calculate rewards
         if np.array_equal(self.predator_position, self.prey_position):
-            reward = 5.0  # Predator caught the prey
+            reward = 50.0 - (0.5 * self.current_step) # Predator caught the prey
             done = True
         elif self.current_step >= self.max_steps:
-            reward = -20.0  # Maximum steps reached
+            reward = -50.0  # Maximum steps reached
             done = True
         else:
-            reward = -0.1 * (int(self.current_step/10) + 1)  # Default reward
+            #print(0.01 * np.sqrt(max(0, 100 - np.linalg.norm(self.predator_position - self.prey_position)**2))) 
+            reward = (0.03 * (10 - np.linalg.norm(self.predator_position - self.prey_position)))#(0.05 * np.sqrt(max(0, 100 - np.linalg.norm(self.predator_position - self.prey_position)**2))) # Default reward
             done = False
 
         state = self._get_state()
@@ -168,7 +171,11 @@ class DQNAgent:
         torch.save({'model_state_dict': self.model.state_dict(), 'optimizer_state_dict': self.optimizer.state_dict()}, location)
 # Define the training loop
 
+allRewards = []
+allSteps = []
 def train_agent(env, agent, num_episodes):
+    reward_graph = 0
+    steps_graph = 0
     for episode in range(num_episodes):
         state = env.reset()
         done = False
@@ -181,9 +188,16 @@ def train_agent(env, agent, num_episodes):
             agent.train(state, action, reward, next_state, done)
             total_reward += reward
             state = next_state
+        reward_graph += total_reward
+        steps_graph += iter
 
         print(f"Episode: {episode + 1}, Steps till Capture: {iter}, Total Reward: {total_reward}")
-
+        if (episode % 100 == 99):
+            
+            allRewards.append(reward_graph/100)
+            allSteps.append(steps_graph/100)
+            reward_graph = 0
+            steps_graph = 0
 # Create the environment and agent
 
 env = PredatorPreyEnvironment()
@@ -191,6 +205,11 @@ agent = DQNAgent(env.state_size, env.action_size)
 
 # Train the agent
 
-num_episodes = 1000
+num_episodes = 50000
 train_agent(env, agent, num_episodes)
 agent.save_model("models/one_predator_policy_smart_prey.pt")
+
+with open("graphs/single_pred_perf.csv", 'w') as csvfile:
+    writer = csv.writer(csvfile, delimiter=",")
+    for x in range(len(allRewards)):
+        writer.writerow([allRewards[x], allSteps[x]])
