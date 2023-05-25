@@ -45,7 +45,7 @@ class PredatorPreyEnvironment(gym.Env):
 
         # Update predator position based on the action
         prey_speed = 3
-        if (self.current_step % prey_speed == 0):
+        if (self.current_step % prey_speed == prey_speed - 1):
             self.predator_position += predator_direction
             self.predator_position = np.clip(self.predator_position, 0, 10)
         if np.array_equal(self.predator_position, self.prey_position):
@@ -188,9 +188,9 @@ agent = DQNAgent(env.state_size, env.action_size)
 
 # Train the agent
 
-num_episodes = 5000
+num_episodes = 10
 train_agent(env, agent, num_episodes)
-agent.save_model("models/prey_policy.pt")
+agent.save_model("models/prey_policy1.pt")
 
 state = env.reset()
 done = False
