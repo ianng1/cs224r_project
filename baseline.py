@@ -15,13 +15,12 @@ class PredatorPreyEnvironment:
         self.action_size = 8  # Example: 8 actions (up, down, left, right)
         self.max_steps = 100  # Maximum number of steps per episode
         self.current_step = 0
-        self.prey_position = [0, 0]  # Example: Prey's initial position
-        self.predator_positions = [[2, 2], [3, 3]]  # Example: Initial positions of two predators
+        self.prey_position = np.random.randint(0, board_size, 2)  # Example: Prey's initial position
+        self.predator_positions = [np.random.randint(0, board_size, 2), np.random.randint(0, board_size, 2)]  # Example: Initial positions of two predators
 
-        agent = DQNAgent(self.state_size, self.action_size)
-        ckpt = torch.load('models/prey_policy.pt')
-        self.prey_policy = agent.model.load_state_dict(ckpt['model_state_dict'])
-        #self.prey_agent.optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+        self.prey_agent = DQNAgent(self.state_size, self.action_size)
+        ckpt = torch.load('/models/prey_policy.pt')
+        self.prey_agent.model.load_state_dict(ckpt['model_state_dict'])
 
     def reset(self):
         self.current_step = 0
@@ -32,6 +31,9 @@ class PredatorPreyEnvironment:
 
     def step(self, action):
         self.current_step += 1
+
+        action1 = int(torch.argmax(action[0]))
+        action2 = int(torch.argmax(action[1]))
 
         # Define movement directions for both predator and prey
         directions = {
@@ -45,30 +47,31 @@ class PredatorPreyEnvironment:
             7: np.array([1, 1]),    # Down-Right
         }
 
-        predator_direction = directions[action]
         #prey_direction = self._get_prey_direction()
         
         # Update predator position based on the action
-        self.predator_position += predator_direction
-        self.predator_position = np.clip(self.predator_position, 0, board_size - 1)
+        self.predator_positions[0] += directions[action1]
+        self.predator_positions[0] = np.clip(self.predator_positions[0], 0, board_size - 1)
+        self.predator_positions[1] += directions[action2]
+        self.predator_positions[1] = np.clip(self.predator_positions[1], 0, board_size - 1)
 
         # Update prey position based on distance-based movement
         prey_speed = 2  # Number of grid cells the prey can move in a single time step
         for i in range(prey_speed):
             state = self._get_state()
-            prey_action = self.prey_policy.get_action(state)
+            prey_action = self.prey_agent.get_action(state)
             self.prey_position += directions[prey_action]
             self.prey_position = np.clip(self.prey_position, 0, board_size - 1)
 
         # Calculate rewards
-        if np.array_equal(self.predator_position, self.prey_position):
-            reward = 5.0  # Predator caught the prey
+        if np.array_equal(self.predator_positions[0], self.prey_position) or np.array_equal(self.predator_positions[1], self.prey_position):
+            reward = 50.0  - (0.5 * self.current_step) # Predator caught the prey
             done = True
         elif self.current_step >= self.max_steps:
-            reward = 0.0  # Maximum steps reached
+            reward = -50.0  # Maximum steps reached
             done = True
         else:
-            reward = -0.1  # Distance between predator and prey
+            reward = 0.03 * (10 - np.linalg.norm(np.mean([self.predator_positions[0], self.predator_positions[1]]) - self.prey_position))  # Distance between predator and prey
             done = False
 
         state = self._get_state()
@@ -76,7 +79,12 @@ class PredatorPreyEnvironment:
 
     def _get_state(self):
         # Example: Concatenate predator and prey positions as the state
-        state = np.concatenate((self.predator_positions[0], self.predator_positions[1], self.prey_position))
+        closer_predator_position = None
+        dist_pred1 = np.linalg.norm(np.array(self.predator_positions[0]) - np.array(self.prey_position))
+        dist_pred2 = np.linalg.norm(np.array(self.predator_positions[1]) - np.array(self.prey_position))
+        closer_predator_position = self.predator_positions[np.argmin([dist_pred1, dist_pred2])]
+        
+        state = np.concatenate((closer_predator_position, self.prey_position))
         return state
 
 # Define the MADDPG agent
@@ -89,6 +97,7 @@ class Actor(nn.Module):
         self.fc3 = nn.Linear(32, action_size)
 
     def forward(self, state):
+        #print("in target actor", state.shape)
         x = F.relu(self.fc1(state))
         x = F.relu(self.fc2(x))
         x = torch.tanh(self.fc3(x))
@@ -115,6 +124,8 @@ class MADDPGAgent:
         self.discount_factor = discount_factor
         self.tau = tau
 
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         # Create local and target actor and critic networks
         self.local_actor = Actor(state_size, action_size)
         self.target_actor = Actor(state_size, action_size)
@@ -132,18 +143,18 @@ class MADDPGAgent:
     def get_action(self, state):
         state = torch.from_numpy(state).float().unsqueeze(0)
         with torch.no_grad():
-            action = self.local_actor(state).squeeze(0).numpy()
+            action = self.local_actor(state).squeeze(0)
         return action
 
     def train(self, states, actions, rewards, next_states, dones, other_agents, other_actions):
-        states = torch.FloatTensor(states)
-        actions = torch.FloatTensor(actions)
-        rewards = torch.FloatTensor(rewards).unsqueeze(1)
-        next_states = torch.FloatTensor(next_states)
-        dones = torch.FloatTensor(dones).unsqueeze(1)
+        states = torch.tensor(states, dtype=torch.float32).unsqueeze(0).to(self.device)
+        next_states = torch.tensor(next_states, dtype=torch.float32).unsqueeze(0).to(self.device)
+        actions = torch.tensor(actions, dtype=torch.long).unsqueeze(0).to(self.device)
+        rewards = torch.tensor(rewards, dtype=torch.float32).unsqueeze(0).to(self.device)
+        dones = torch.tensor(dones, dtype=torch.float32).unsqueeze(0).to(self.device)
 
-        # Update critic
-        next_actions = torch.cat([agent.target_actor(next_state) for agent, next_state in zip(other_agents, next_states)], dim=1)
+        next_actions = torch.stack([agents[0].target_actor(next_states[0]), agents[1].target_actor(next_states[0])], dim=0)
+        next_states = torch.stack([next_states[0], next_states[0]], dim=0)
         target_values = rewards + self.discount_factor * (1 - dones) * self.target_critic(next_states, next_actions)
         predicted_values = self.local_critic(states, actions)
         critic_loss = F.mse_loss(predicted_values, target_values)
@@ -152,7 +163,8 @@ class MADDPGAgent:
         self.critic_optimizer.step()
 
         # Update actor
-        pred_actions = torch.cat([agent.local_actor(state) for agent, state in zip(other_agents, states)], dim=1)
+        states = torch.stack([states[0], states[0]], dim=0)
+        pred_actions = torch.stack([agent.local_actor(state) for agent, state in zip(other_agents, states)], dim=0)
         actor_loss = -self.local_critic(states, pred_actions).mean()
         self.actor_optimizer.zero_grad()
         actor_loss.backward()
@@ -163,6 +175,9 @@ class MADDPGAgent:
             target_param.data.copy_(self.tau * local_param.data + (1.0 - self.tau) * target_param.data)
         for target_param, local_param in zip(self.target_critic.parameters(), self.local_critic.parameters()):
             target_param.data.copy_(self.tau * local_param.data + (1.0 - self.tau) * target_param.data)
+    
+    def save_model(self, location):
+        torch.save({'model_state_dict': self.local_actor.state_dict(), 'optimizer_state_dict': self.actor_optimizer.state_dict()}, location)
 
 class QNetwork(nn.Module):
     def __init__(self, state_size, action_size):
@@ -212,7 +227,7 @@ class DQNAgent:
         state = torch.tensor(state, dtype=torch.float32).unsqueeze(0).to(self.device)
         next_state = torch.tensor(next_state, dtype=torch.float32).unsqueeze(0).to(self.device)
         action = torch.tensor(action, dtype=torch.long).unsqueeze(0).to(self.device)
-        reward = torch.tensor(reward, dtype=torch.float32).unsqueeze(0).to(self.device)
+        reward = torch.tensor(reward, dtype=torch.float32).to(self.device)
         done = torch.tensor(done, dtype=torch.float32).unsqueeze(0).to(self.device)
 
         #print()
@@ -232,32 +247,41 @@ class DQNAgent:
     def save_model(self, location):
         torch.save(self.model.state_dict(), location)
 
-
-
 # Define the training loop
-
+all_rewards = []
+all_steps = []
 def train_agents(env, agents, num_episodes):
+    reward_graph = 0
+    steps_graph = 0
     for episode in range(num_episodes):
         states = env.reset()
         done = False
         total_rewards = [0.0] * len(agents)
-
+        iter = 0
         while not done:
+            iter += 1
             actions = []
             for i, agent in enumerate(agents):
                 action = agent.get_action(states)
                 actions.append(action)
-
             next_states, rewards, done, _ = env.step(actions)
 
             for i, agent in enumerate(agents):
-                agent.train(states, actions[i], rewards[i], next_states, done, agents, actions)
+                agent.train(states, actions[i], rewards, next_states, done, agents, actions)
 
-                total_rewards[i] += rewards[i]
+                total_rewards[i] += rewards
 
             states = next_states
+        reward_graph += total_rewards[0]
+        steps_graph += iter
 
-        print(f"Episode: {episode + 1}, Total Rewards: {total_rewards}")
+        print(f"Episode: {episode + 1}, Moves until Capture: {iter}, Total Rewards: {total_rewards}")
+
+        if (episode % 10 == 9):
+            all_rewards.append(reward_graph/10)
+            all_steps.append(steps_graph/10)
+            reward_graph = 0
+            steps_graph = 0
 
 # Create the environment and agents
 
@@ -270,3 +294,5 @@ agents = [agent1, agent2]
 
 num_episodes = 1000
 train_agents(env, agents, num_episodes)
+agent1.save_model('/models/agent1.pt')
+agent1.save_model('/models/agent2.pt')
