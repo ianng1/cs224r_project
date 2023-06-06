@@ -7,16 +7,22 @@ import csv
 import matplotlib.pyplot as plt
 # Define the PredatorPreyEnvironment Gym environment
 
+board_size = 10
 class PredatorPreyEnvironment(gym.Env):
     def __init__(self):
         super(PredatorPreyEnvironment, self).__init__()
-        self.state_size = 4  # Example: 4-dimensional state
+        self.state_size = 4  # Example: 4-dimensional state 
         self.action_size = 8  # Example: 8 actions (up, down, left, right, up-left, up-right, down-left, down-right)
         self.max_steps = 100  # Maximum number of steps per episode
         self.current_step = 0
-        self.prey_position = np.array([np.random.randint(0, 9), np.random.randint(0, 9)])  # Example: Prey's initial position
-        self.predator_position = np.array([np.random.randint(0, 9), np.random.randint(0, 9)])  # Example: Initial position of the predator
-
+        self.prey_position = np.array([0, 0])  # Example: Prey's initial position
+        #self.predator_position = np.array([2, 2])  # Example: Initial position of the predator
+        self.predator_position = np.random.randint(0, board_size, 2)
+        
+        self.prey_agent = DQNAgent(self.state_size, self.action_size)
+        ckpt = torch.load('models/prey_policy.pt')
+        self.prey_agent.model.load_state_dict(ckpt['model_state_dict'])
+    
     def reset(self):
         self.current_step = 0
         self.prey_position = np.array([np.random.randint(0, 9), np.random.randint(0, 9)])
@@ -40,33 +46,31 @@ class PredatorPreyEnvironment(gym.Env):
             7: np.array([1, 1]),    # Down-Right
         }
 
-        prey_direction = directions[action]
-        predator_direction = self._get_predator_direction()
+        predator_direction = directions[action]
+        #prey_direction = self._get_prey_direction()
 
         # Update predator position based on the action
-        prey_speed = 3
-        if (self.current_step % prey_speed == 0):
-            self.predator_position += predator_direction
-            self.predator_position = np.clip(self.predator_position, 0, 10)
+        self.predator_position += predator_direction
+        self.predator_position = np.clip(self.predator_position, 0, board_size - 1)
+
+        # Update prey position based on distance-based movement
+        prey_speed = 2  # Number of grid cells the prey can move in a single time step
+        for _ in range(prey_speed):
+            state = self._get_state()
+            prey_action = self.prey_agent.get_action(state)
+            self.prey_position += directions[prey_action]
+            self.prey_position = np.clip(self.prey_position, 0, board_size - 1)
+        
+        # Calculate rewards
         if np.array_equal(self.predator_position, self.prey_position):
-            reward = -10.0  # Predator caught the prey
+            reward = 5.0  # Predator caught the prey
+            done = True
+        elif self.current_step >= self.max_steps:
+            reward = -20.0  # Maximum steps reached
             done = True
         else:
-            # Update prey position based on distance-based movement
-             # Number of grid cells the prey can move in a single time step
-            self.prey_position += prey_direction
-            self.prey_position = np.clip(self.prey_position, 0, 10)
-
-            # Calculate rewards
-            if np.array_equal(self.predator_position, self.prey_position):
-                reward = -10.0  # Predator caught the prey
-                done = True
-            elif self.current_step >= self.max_steps:
-                reward = 10.0  # Maximum steps reached
-                done = True
-            else:
-                reward = 1  # Default reward
-                done = False
+            reward = -0.1 * (int(self.current_step/10) + 1)  # Default reward
+            done = False
 
         state = self._get_state()
         return state, reward, done, {}
@@ -88,7 +92,7 @@ class PredatorPreyEnvironment(gym.Env):
             7: np.array([1, 1]),    # Down-Right
         }
         new_locations = [(self.predator_position + directions[i]) for i in range(8)]
-        new_locations = [np.clip(loc, 0, 10) for loc in new_locations]
+        new_locations = [np.clip(loc, 0, board_size - 1) for loc in new_locations]
         distances = [np.linalg.norm(x - np.array([self.prey_position[0], self.prey_position[1]])) for x in new_locations]
         best = np.argmin(np.array(distances))
         return directions[best]
@@ -203,14 +207,9 @@ with open('one_predator_train_movements.csv', 'w') as csvfile:
         agent.train(state, action, reward, next_state, done)
         total_reward += reward
         state = next_state
-        
-
-
-
-
 
 plt.ion()
-with open('prey_train_movements.csv', 'r') as csvfile:
+with open('one_predator_train_movements.csv', 'r') as csvfile:
     reader = csv.reader(csvfile, delimiter=",")
     for row in reader:
         ar = np.ones((11, 11, 3))
@@ -219,3 +218,4 @@ with open('prey_train_movements.csv', 'r') as csvfile:
         plt.imshow(ar)
         plt.show()
         plt.pause(0.02)
+        plt.close()
