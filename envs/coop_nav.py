@@ -216,6 +216,9 @@ class MADDPG:
     def update(self, agent_id, state, action, reward, next_state, done):
         self.agents[agent_id].update(state, action, reward, next_state, done)
 
+    def save_model(self, location):
+        for i, agent in enumerate(self.agents):
+            torch.save({'model_state_dict': self.agent.actor.state_dict(), 'optimizer_state_dict': self.agent.actor_optimizer.state_dict()}, location + f'/nav_{i}')
 
 """
 Define training process.
@@ -269,5 +272,7 @@ def run():
         actions = [maddpg.get_action(agent_id, obs[agent_id]) for agent_id in range(env.n_agents)]
         obs, _, done = env.step(actions)
         env.render()
+
+    maddpg.save_model('./models')
 
 run()
