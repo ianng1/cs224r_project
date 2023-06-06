@@ -67,10 +67,21 @@ class CooperativeNavigationEnv:
         return True
 
     def calculate_agent_reward(self, agent_id):
-        if (self.agent_pos[agent_id] == self.landmark_pos[agent_id]).all():
-            return 1.0
-        else:
-            return 0.0
+        reward = 0.0
+
+        # Punish collisions
+        if self.check_collision(agent_id):
+            reward -= 0.5
+
+        # Reward reaching any landmark
+        if np.any((self.agent_pos[agent_id] == self.landmark_pos).all(axis=1)):
+            reward += 0.2
+
+        # Small negative reward for each timestep where the agent is not at a landmark
+        if not np.any((self.agent_pos[agent_id] == self.landmark_pos).all(axis=1)):
+            reward -= 0.01
+
+        return reward
 
     def get_observation(self):
         obs_n = []
