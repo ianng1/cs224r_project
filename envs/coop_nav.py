@@ -16,6 +16,7 @@ class CooperativeNavigationEnv:
         self.grid_size = 10
 
         self.agent_pos = np.zeros((self.n_agents, 2), dtype=np.int32)
+        self.agent_locked = np.zeros(self.n_agents, dtype=bool)
         self.landmark_pos = np.zeros((self.n_landmarks, 2), dtype=np.int32)
 
         self.reset()
@@ -23,6 +24,7 @@ class CooperativeNavigationEnv:
     def reset(self):
         self.agent_pos = self.generate_unique_positions(self.n_agents)
         self.landmark_pos = self.generate_unique_positions(self.n_landmarks)
+        self.agent_locked = np.zeros(self.n_agents, dtype=bool)
 
         return self.get_observation()
 
@@ -42,6 +44,9 @@ class CooperativeNavigationEnv:
         return obs_next_n, rewards_n, dones_n, {}
 
     def move_agent(self, agent_id, action):
+        if self.agent_locked[agent_id]:
+            return
+        
         action = np.argmax(action)
         if action == 0:  # Move Up
             self.agent_pos[agent_id][1] = max(self.agent_pos[agent_id][1] - 1, 0)
@@ -68,13 +73,16 @@ class CooperativeNavigationEnv:
 
     def calculate_agent_reward(self, agent_id):
         reward = 0.0
-
+        if self.agent_locked[agent_id]:
+            return reward
+        
         # Punish collisions
         if self.check_collision(agent_id):
             reward -= 0.5
 
-        # Reward reaching any landmark
+        # Reward reaching any landmark and lock agent
         if np.any((self.agent_pos[agent_id] == self.landmark_pos).all(axis=1)):
+            self.agent_locked[agent_id] = True
             reward += 0.2
 
         # Small negative reward for each timestep where the agent is not at a landmark
@@ -93,9 +101,11 @@ class CooperativeNavigationEnv:
         observation = np.zeros((self.grid_size, self.grid_size), dtype=np.float32)
         observation[self.agent_pos[agent_id][0], self.agent_pos[agent_id][1]] = 1.0
 
+        # landmark positions
         for landmark_pos in self.landmark_pos:
             observation[landmark_pos[0], landmark_pos[1]] = 0.5
 
+        # other agents' positions
         for i in range(self.n_agents):
             if i != agent_id:
                 observation[self.agent_pos[i][0], self.agent_pos[i][1]] = -0.5
